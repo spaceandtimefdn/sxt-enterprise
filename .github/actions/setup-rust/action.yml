@@ -1,0 +1,31 @@
+name: "setup-rust"
+description: "Install a Rust toolchain, optional taiki-e/install-action tools, and cache the build"
+inputs:
+  toolchain:
+    description: "Rust toolchain to install (stable, nightly, 1.82.0, etc.)"
+    required: false
+    default: "stable"
+  rust-cache:
+    required: false
+    default: "true"
+  install-action-tool:
+    required: false
+    default: ""
+runs:
+  using: "composite"
+  steps:
+    - uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ inputs.toolchain }}
+        components: clippy, rustfmt
+    - if: ${{ inputs['install-action-tool'] != '' }}
+      uses: taiki-e/install-action@v2
+      with:
+        tool: ${{ inputs['install-action-tool'] }}
+    - if: ${{ inputs['rust-cache'] == 'true' }}
+      uses: Swatinem/rust-cache@v2
+      with:
+        cache-all-crates: "true"
+        key: ${{ github.event.pull_request.base.sha || github.sha }}
+        save-if: ${{ github.ref == 'refs/heads/main' }}
+        lookup-only: ${{ github.ref != 'refs/heads/main' }}

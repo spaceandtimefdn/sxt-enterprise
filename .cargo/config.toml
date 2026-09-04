@@ -1,0 +1,2 @@
+[alias]
+f = "fmt --all -- --config group_imports=StdExternalCrate,imports_granularity=Module"

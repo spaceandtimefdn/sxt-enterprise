@@ -1,0 +1,60 @@
+[package]
+name = "sxt-enterprise"
+version = "0.1.0"
+edition = "2024"
+repository = "https://github.com/spaceandtimefdn/sxt-enterprise"
+
+[dependencies]
+ark-serialize = "0.5.0"
+arrow = { version = "51.0.0", default-features = false, features = ["json", "prettyprint"] }
+axum = "0.8.9"
+base64 = "0.23.1"
+bincode = "2.0.1"
+bumpalo = "3.20.3"
+clap = { version = "4.6.6", features = ["derive"] }
+datafusion-common = { version = "38.0.0", default-features = false }
+halo2curves = "0.8.0"
+nova-snark = { version = "0.41.0", default-features = false }
+parking_lot = "0.12.5"
+parquet = "51"
+# `default-features = false` drops blitzar, which needs a CUDA toolchain.
+# Pinned to a commit, not crates.io: fixes DataAccessorImpl::get_length; no release has it yet.
+proof-of-sql = { git = "https://github.com/spaceandtimefdn/sxt-proof-of-sql", rev = "70503b2f07a07fa13b8eee36ad3495d7cc795e6c", default-features = false, features = ["arrow", "cpu-perf", "hyperkzg_proof"] }
+proof-of-sql-planner = { git = "https://github.com/spaceandtimefdn/sxt-proof-of-sql", rev = "70503b2f07a07fa13b8eee36ad3495d7cc795e6c", default-features = false }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+sqlparser = "0.45.0"
+thiserror = "2.0.17"
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "net"] }
+ureq = "3"
+
+[dev-dependencies]
+datafusion = { version = "38.0.0", default-features = false }
+proof-of-sql = { git = "https://github.com/spaceandtimefdn/sxt-proof-of-sql", rev = "70503b2f07a07fa13b8eee36ad3495d7cc795e6c", default-features = false, features = ["test"] }
+tempfile = "3.23.0"
+tiny_http = "0.12.0"
+tower = { version = "0.5.3", features = ["util"] }
+
+[lints.rust]
+missing_docs = "warn"
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage_nightly)"] }
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+alloc_instead_of_core = "warn"
+allow_attributes = "warn"
+allow_attributes_without_reason = "warn"
+dbg_macro = "warn"
+missing_docs_in_private_items = "warn"
+panic = "warn"
+std_instead_of_alloc = "warn"
+std_instead_of_core = "warn"
+todo = "warn"
+unimplemented = "warn"
+unreachable = "warn"
+unwrap_used = "warn"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"

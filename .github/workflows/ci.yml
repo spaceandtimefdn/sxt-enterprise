@@ -1,0 +1,72 @@
+name: format, lint, test, coverage
+on:
+  merge_group: {}
+  pull_request: {}
+
+jobs:
+  format:
+    name: format (cargo fmt and cargo sort)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-rust
+        with:
+          rust-cache: "false"
+          install-action-tool: cargo-sort
+      - run: cargo f --check
+      - run: cargo sort --check
+  lint:
+    name: lint (cargo clippy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-rust
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+  test:
+    name: test (cargo nextest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-rust
+        with:
+          install-action-tool: cargo-nextest
+      - run: cargo nextest run
+  udeps:
+    name: udeps (cargo udeps)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-rust
+        with:
+          toolchain: nightly
+          install-action-tool: cargo-udeps
+      - run: cargo +nightly udeps --all-targets
+  coverage:
+    name: coverage (cargo llvm-cov)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-rust
+        with:
+          toolchain: nightly
+          install-action-tool: cargo-nextest,cargo-llvm-cov
+      - id: coverage
+        run: |
+          echo "report<<EOF" >> "$GITHUB_OUTPUT"
+          echo '```' >> "$GITHUB_OUTPUT"
+          set +e
+          cargo +nightly llvm-cov nextest --show-missing-lines --fail-uncovered-lines 0 --fail-uncovered-functions 0 | tee -a "$GITHUB_OUTPUT"
+          status="${PIPESTATUS[0]}"
+          set -e
+          echo '```' >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+          exit "$status"
+      - name: Update PR with coverage report
+        if: always() && github.event_name == 'pull_request'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: "llvm-cov-report"
+          message: ${{ steps.coverage.outputs.report }}
