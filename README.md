@@ -44,11 +44,11 @@ constant compiled into the binary, so it needs no download and no network access
 ## Install
 
 ```sh
-cargo install --path .
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/spaceandtimefdn/sxt-enterprise/releases/latest/download/sxt-enterprise-installer.sh | sh
 ```
 
-Or build the [Dockerfile](Dockerfile). The same binary runs the server and the verification
-CLI; an auditor installs it and uses `verify`.
+Or `cargo install --path .`, or build the [Dockerfile](Dockerfile). The same binary runs the
+server and the verification CLI; an auditor installs it and uses `verify`.
 
 ## Quick start
 
