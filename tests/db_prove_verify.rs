@@ -46,7 +46,7 @@ fn we_can_prove_and_verify_a_query_after_reopening_the_database() {
     // Reopen from disk: nothing above is still in memory.
     let db = Db::open(dir.path().to_path_buf()).unwrap();
     let sql = "SELECT label FROM db.items WHERE id = 2";
-    let proof = prove(&db, sql, &setup[..]).unwrap();
+    let (proof, _fields) = prove(&db, sql, &setup[..]).unwrap();
 
     let commitments: QueryCommitments<_> = db
         .commitments(core::slice::from_ref(&table_ref))

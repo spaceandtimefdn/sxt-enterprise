@@ -3,14 +3,15 @@
 use bumpalo::Bump;
 use datafusion_common::config::ConfigOptions;
 use proof_of_sql::base::database::{
-    ArrowArrayToColumnConversionError, ColumnType, DataAccessorImpl, ParseError,
-    SchemaAccessorImpl, TableDataAccessor, TableRef,
+    ArrowArrayToColumnConversionError, ColumnField, ColumnType, DataAccessorImpl, OwnedColumn,
+    OwnedTable, ParseError, SchemaAccessorImpl, TableDataAccessor, TableRef,
 };
+use proof_of_sql::base::scalar::Scalar;
 use proof_of_sql::base::{IndexMap, PlaceholderError};
 use proof_of_sql::proof_primitive::hyperkzg::{
     HyperKZGCommitmentEvaluationProof, HyperKZGPublicSetup,
 };
-use proof_of_sql::sql::proof::VerifiableQueryResult;
+use proof_of_sql::sql::proof::{ProofPlan, VerifiableQueryResult};
 use proof_of_sql_planner::{PlannerError, get_table_refs_from_statement, sql_to_proof_plans};
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::{Parser, ParserError};
@@ -41,6 +42,9 @@ pub enum ProveError {
     /// The proof could not be constructed.
     #[error(transparent)]
     Prove(#[from] PlaceholderError),
+    /// An aggregate result (e.g. `SUM`) did not fit in its column's declared type.
+    #[error("aggregate result overflowed its column type")]
+    ScalarOverflow,
 }
 
 /// The tables `sql`'s single statement references.
@@ -60,6 +64,10 @@ pub fn table_refs(sql: &str) -> Result<Vec<TableRef>, ProveError> {
 /// Proves `sql` against `db`'s current data; a caller wanting to verify the proof must fetch
 /// the referenced tables' commitments itself, e.g. via [`Db::snapshot`].
 ///
+/// Returns the proof alongside the query's declared result column fields, which a caller needs
+/// to interpret aggregate (e.g. `SUM`, `GROUP BY`) result columns via [`coerce_scalars`]: those
+/// come back as raw finite-field scalars rather than their real numeric type.
+///
 /// # Errors
 /// Fails if `sql` is not exactly one valid statement, references a table `db` does not have,
 /// or the proof itself cannot be constructed.
@@ -71,7 +79,13 @@ pub fn prove(
     db: &Db,
     sql: &str,
     setup: HyperKZGPublicSetup<'_>,
-) -> Result<VerifiableQueryResult<HyperKZGCommitmentEvaluationProof>, ProveError> {
+) -> Result<
+    (
+        VerifiableQueryResult<HyperKZGCommitmentEvaluationProof>,
+        Vec<ColumnField>,
+    ),
+    ProveError,
+> {
     let statements = Parser::parse_sql(&GenericDialect {}, sql)?;
     let [statement] = &statements[..] else {
         return Err(ProveError::StatementCount(statements.len()));
@@ -104,6 +118,7 @@ pub fn prove(
     // One statement in always yields exactly one plan out; see sql_to_posql_plans.
     let plans = sql_to_proof_plans(&statements, &schema_accessor, &ConfigOptions::default())?;
     let plan = &plans[0];
+    let fields = plan.get_column_result_fields();
 
     let alloc = Bump::new();
     let data_lookup = tables
@@ -121,7 +136,62 @@ pub fn prove(
         &setup,
         &[],
     )?;
-    Ok(result)
+    Ok((result, fields))
+}
+
+/// Coerces `table`'s aggregate result columns to `fields`' declared types.
+///
+/// `SUM`/`GROUP BY` results come back from proving as raw finite-field scalars
+/// (`OwnedColumn::Scalar`), since summation happens in-field to avoid silently overflowing the
+/// column's real numeric type; this converts them back to that type, as declared by the query
+/// plan's own result fields (see [`prove`]).
+///
+/// # Errors
+/// Fails if an aggregate result does not fit in its column's declared type.
+///
+/// # Panics
+/// Never: `table`'s column count and each column's length are unchanged by coercion.
+pub fn coerce_scalars<S: Scalar>(
+    table: OwnedTable<S>,
+    fields: &[ColumnField],
+) -> Result<OwnedTable<S>, ProveError> {
+    let columns = table
+        .into_inner()
+        .into_iter()
+        .zip(fields)
+        .map(|((name, column), field)| {
+            let column = match column {
+                OwnedColumn::Scalar(values) => coerce_scalar_column(values, field.data_type())?,
+                column => column,
+            };
+            Ok((name, column))
+        })
+        .collect::<Result<Vec<_>, ProveError>>()?;
+    Ok(OwnedTable::try_from_iter(columns).expect("column count and lengths are unchanged"))
+}
+
+/// Coerces a single aggregate result column of raw scalars to `to_type`.
+fn coerce_scalar_column<S: Scalar>(
+    values: Vec<S>,
+    to_type: ColumnType,
+) -> Result<OwnedColumn<S>, ProveError> {
+    fn convert<S: Scalar + TryInto<T>, T>(values: Vec<S>) -> Result<Vec<T>, ProveError> {
+        values
+            .into_iter()
+            .map(|value| value.try_into().map_err(|_| ProveError::ScalarOverflow))
+            .collect()
+    }
+
+    Ok(match to_type {
+        ColumnType::Uint8 => OwnedColumn::Uint8(convert(values)?),
+        ColumnType::TinyInt => OwnedColumn::TinyInt(convert(values)?),
+        ColumnType::SmallInt => OwnedColumn::SmallInt(convert(values)?),
+        ColumnType::Int => OwnedColumn::Int(convert(values)?),
+        ColumnType::BigInt => OwnedColumn::BigInt(convert(values)?),
+        ColumnType::Int128 => OwnedColumn::Int128(convert(values)?),
+        ColumnType::Decimal75(precision, scale) => OwnedColumn::Decimal75(precision, scale, values),
+        _ => OwnedColumn::Scalar(values),
+    })
 }
 
 #[cfg(test)]
@@ -189,7 +259,7 @@ mod tests {
     fn we_can_prove_a_query_over_a_single_row() {
         let (_dir, db, _table_ref) = db_with_one_row();
 
-        let proof = prove(&db, "SELECT id FROM db.singleton", &setup()[..]).unwrap();
+        let (proof, _fields) = prove(&db, "SELECT id FROM db.singleton", &setup()[..]).unwrap();
 
         assert_eq!(proof.result.num_rows(), 1);
     }

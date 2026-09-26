@@ -37,7 +37,8 @@ fn we_can_prove_a_filter_query() {
     .unwrap();
     db.insert(&table_ref, &batch, &setup[..]).unwrap();
 
-    let proof = prove(&db, "SELECT label FROM db.items WHERE id = 2", &setup[..]).unwrap();
+    let (proof, _fields) =
+        prove(&db, "SELECT label FROM db.items WHERE id = 2", &setup[..]).unwrap();
 
     assert_eq!(proof.result.num_rows(), 1);
 }
