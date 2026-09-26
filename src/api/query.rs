@@ -79,14 +79,15 @@ pub async fn query(
     Json(body): Json<Query>,
 ) -> Result<Json<QueryResult>, QueryError> {
     let table_refs = prove::table_refs(&body.sql)?;
-    let (result, commitments) = {
+    let (result, fields, commitments) = {
         let db = state.db.lock();
-        let result = prove(&db, &body.sql, &state.setup[..])?;
+        let (result, fields) = prove(&db, &body.sql, &state.setup[..])?;
         let commitments = db.commitments(&table_refs)?;
-        (result, commitments)
+        (result, fields, commitments)
     };
 
-    let batch = RecordBatch::try_from(result.result.clone())?;
+    let coerced = prove::coerce_scalars(result.result.clone(), &fields)?;
+    let batch = RecordBatch::try_from(coerced)?;
     let mut writer = arrow::json::ArrayWriter::new(Vec::new());
     writer.write(&batch)?;
     writer.finish()?;
